@@ -89,10 +89,10 @@ def run(args):
         base = f"http://127.0.0.1:{proxy_port}"
 
         def run_claude(label):
-            claude_env = dict(os.environ)
+            claude_env = {key: value for key, value in os.environ.items() if not key.startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH_"))}
             claude_env.update({
                 "ANTHROPIC_BASE_URL": base,
-                "ANTHROPIC_AUTH_TOKEN": "cooldown-e2e-client",
+                "CLAUDE_CODE_OAUTH_TOKEN": "cooldown-e2e-client",
                 "ANTHROPIC_API_KEY": "",
                 "CLAUDE_CONFIG_DIR": str(root / "claude"),
                 "CLAUDE_CODE_ENTRYPOINT": "t3-code",

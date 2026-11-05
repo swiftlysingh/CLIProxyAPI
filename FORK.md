@@ -14,6 +14,16 @@ headers, including when `requests.passthrough-headers` is disabled. Trusted loca
 timing overrides an individual account's upstream headers. Expired pool deadlines
 suppress stale upstream reset headers.
 
+Claude Code 2.1.318 emits subscription reset events only in OAuth mode. For a local
+proxy, pass the proxy's client key as `CLAUDE_CODE_OAUTH_TOKEN`, keep
+`ANTHROPIC_BASE_URL` pointed at the proxy, and remove `ANTHROPIC_AUTH_TOKEN` from
+that provider's environment. The same local key still authenticates to CLIProxy;
+this does not replace or expose an upstream account credential. Bearer-token mode
+does not emit reset events even when the response has valid reset headers.
+
+The proxy omits a representative claim because a pool deadline does not describe
+one specific five-hour or seven-day quota window.
+
 ## Verification
 
 Build and run the existing suite:

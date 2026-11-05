@@ -341,9 +341,8 @@ func ClaudeCooldownHeaders(err error) http.Header {
 		return nil
 	}
 	return http.Header{
-		"Anthropic-Ratelimit-Unified-Status":               []string{"rejected"},
-		"Anthropic-Ratelimit-Unified-Reset":                []string{strconv.FormatInt(deadline.Add(time.Second-time.Nanosecond).Unix(), 10)},
-		"Anthropic-Ratelimit-Unified-Representative-Claim": []string{"unified"},
+		"Anthropic-Ratelimit-Unified-Status": []string{"rejected"},
+		"Anthropic-Ratelimit-Unified-Reset":  []string{strconv.FormatInt(deadline.Add(time.Second-time.Nanosecond).Unix(), 10)},
 	}
 }
 
