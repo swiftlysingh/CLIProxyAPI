@@ -596,6 +596,11 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 		for _, value := range coreauth.SafeResponseHeaders(msg.Error).Values("Retry-After") {
 			c.Writer.Header().Add("Retry-After", value)
 		}
+		if status == http.StatusTooManyRequests {
+			for key, values := range coreauth.ClaudeCooldownHeaders(msg.Error) {
+				c.Writer.Header()[key] = values
+			}
+		}
 	}
 	if msg != nil && msg.Addon != nil && handlers.PassthroughHeadersEnabled(h.CurrentConfig()) {
 		for key, values := range msg.Addon {
@@ -605,6 +610,9 @@ func (h *ClaudeCodeAPIHandler) WriteErrorResponse(c *gin.Context, msg *interface
 			// A locally trusted cooldown deadline outranks the raw upstream
 			// Retry-After; keep the value written above.
 			if coreauth.HasTrustedRetryDeadline(msg.Error) && http.CanonicalHeaderKey(key) == "Retry-After" {
+				continue
+			}
+			if coreauth.HasTrustedRetryDeadline(msg.Error) && strings.HasPrefix(http.CanonicalHeaderKey(key), "Anthropic-Ratelimit-Unified-") {
 				continue
 			}
 			c.Writer.Header().Del(key)

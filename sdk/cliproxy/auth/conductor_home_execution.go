@@ -82,7 +82,7 @@ func (m *Manager) executeHomeOnce(ctx context.Context, providers []string, req c
 	for homeAuthCount := 1; ; homeAuthCount++ {
 		if maxRetryCredentials > 0 && len(attempted) >= maxRetryCredentials {
 			if lastErr != nil {
-				return cliproxyexecutor.Response{}, markHomeRetryRoundExhausted(preferredExecutionAttemptError(lastErr, upstreamErr), roundTiming.RetryAfter(), true)
+				return cliproxyexecutor.Response{}, roundTiming.Exhausted(preferredExecutionAttemptError(lastErr, upstreamErr), true)
 			}
 			return cliproxyexecutor.Response{}, &Error{Code: "auth_not_found", Message: "no auth available"}
 		}
@@ -98,7 +98,7 @@ func (m *Manager) executeHomeOnce(ctx context.Context, providers []string, req c
 				return cliproxyexecutor.Response{}, markHomeRetryRoundExhausted(preferredErr, homeCooldown.RetryAfter(), false)
 			}
 			if shouldReturnLastErrorOnPickFailure(true, lastErr, errSelection) {
-				return cliproxyexecutor.Response{}, markHomeRetryRoundExhausted(preferredErr, roundTiming.RetryAfter(), isHomeNextRoundImmediatelyAvailable(errSelection))
+				return cliproxyexecutor.Response{}, roundTiming.Exhausted(preferredErr, isHomeNextRoundImmediatelyAvailable(errSelection))
 			}
 			return cliproxyexecutor.Response{}, errSelection
 		}
@@ -113,7 +113,7 @@ func (m *Manager) executeHomeOnce(ctx context.Context, providers []string, req c
 				return cliproxyexecutor.Response{}, errEnd
 			}
 			if lastErr != nil {
-				return cliproxyexecutor.Response{}, markHomeRetryRoundExhausted(preferredExecutionAttemptError(lastErr, upstreamErr), roundTiming.RetryAfter(), false)
+				return cliproxyexecutor.Response{}, roundTiming.Exhausted(preferredExecutionAttemptError(lastErr, upstreamErr), false)
 			}
 			return cliproxyexecutor.Response{}, repeatedHomeAuthError()
 		}

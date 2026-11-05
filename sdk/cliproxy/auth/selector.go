@@ -83,8 +83,16 @@ const (
 type modelCooldownError struct {
 	model    string
 	resetIn  time.Duration
+	deadline time.Time
 	provider string
 	cause    error
+}
+
+func (e *modelCooldownError) recoveryDeadline() time.Time {
+	if e == nil {
+		return time.Time{}
+	}
+	return e.deadline
 }
 
 // NewModelCooldownError creates an error representing model-level cooldown.
@@ -104,6 +112,7 @@ func newModelCooldownErrorWithCause(model, provider string, resetIn time.Duratio
 		model:    model,
 		provider: provider,
 		resetIn:  resetIn,
+		deadline: time.Now().Add(resetIn),
 		cause:    cause,
 	}
 }
@@ -353,7 +362,7 @@ func (e *modelCooldownError) StatusCode() int {
 func (e *modelCooldownError) Headers() http.Header {
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
-	resetSeconds := int(math.Ceil(e.resetIn.Seconds()))
+	resetSeconds := int(math.Ceil(time.Until(e.deadline).Seconds()))
 	if resetSeconds < 0 {
 		resetSeconds = 0
 	}

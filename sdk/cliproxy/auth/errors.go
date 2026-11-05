@@ -345,16 +345,23 @@ func (e *authUnavailableError) Headers() http.Header {
 }
 
 // trustedRetryAfterError annotates a terminal upstream rejection whose
-// locally recorded cooldown deadline governs the client-visible Retry-After.
+// locally recorded cooldown or eligible pool deadline governs the client-visible Retry-After.
 // The wrapped error keeps its own status, body, identity and retry hint; the
-// hint stored here is the effective deadline computed when the result was
-// recorded, so conflicting attempt headers never reach the client directly.
+// hint stored here is the effective recovery deadline, so conflicting attempt
+// headers never reach the client directly.
 type trustedRetryAfterError struct {
 	cause error
 	// deadline is the recovery instant captured when the result was
 	// recorded, so a terminal error revisited after waiting reports only
 	// the remaining time and never re-advertises the full duration.
 	deadline time.Time
+}
+
+func (e *trustedRetryAfterError) recoveryDeadline() time.Time {
+	if e == nil {
+		return time.Time{}
+	}
+	return e.deadline
 }
 
 func trustedRetryAfterHint(err error) *time.Duration {

@@ -142,6 +142,7 @@ type homeDispatchRetryAfterError struct {
 type homeRetryRoundExhaustedError struct {
 	cause         error
 	retryAfter    time.Duration
+	deadline      time.Time
 	hasRetryAfter bool
 	retryNow      bool
 }
@@ -177,6 +178,7 @@ func markHomeRetryRoundExhausted(err error, retryAfter *time.Duration, retryNow 
 	marked := &homeRetryRoundExhaustedError{cause: err, retryNow: retryNow}
 	if retryAfter != nil {
 		marked.retryAfter = *retryAfter
+		marked.deadline = time.Now().Add(*retryAfter)
 		marked.hasRetryAfter = true
 	}
 	if upstreamAttempt {
@@ -195,6 +197,7 @@ func isHomeRetryRoundExhausted(err error) bool {
 
 type homeRetryRoundTiming struct {
 	retryAfter time.Duration
+	deadline   time.Time
 	immediate  bool
 	invalid    bool
 }
@@ -217,17 +220,28 @@ func (t *homeRetryRoundTiming) Observe(err error) {
 		t.invalid = true
 		return
 	}
-	if t.retryAfter <= 0 || *retryAfter < t.retryAfter {
+	deadline := time.Now().Add(*retryAfter)
+	if t.deadline.IsZero() || deadline.Before(t.deadline) {
+		t.deadline = deadline
 		t.retryAfter = *retryAfter
 	}
 }
 
 func (t *homeRetryRoundTiming) RetryAfter() *time.Duration {
-	if t == nil || t.immediate || (!t.invalid && t.retryAfter <= 0) {
+	if t == nil || t.immediate || (!t.invalid && t.deadline.IsZero()) {
 		return nil
 	}
 	value := t.retryAfter
 	return &value
+}
+
+func (t *homeRetryRoundTiming) Exhausted(err error, retryNow bool) error {
+	marked := markHomeRetryRoundExhausted(err, t.RetryAfter(), retryNow)
+	var exhausted *homeRetryRoundExhaustedError
+	if !t.immediate && !t.invalid && !t.deadline.IsZero() && errors.As(marked, &exhausted) {
+		exhausted.deadline = t.deadline
+	}
+	return marked
 }
 
 func (e *homeDispatchRetryAfterError) Error() string {

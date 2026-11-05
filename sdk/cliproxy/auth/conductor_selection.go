@@ -558,6 +558,58 @@ func (m *Manager) availableAuthsForRouteModel(auths []*Auth, provider, routeMode
 	return m.availableAuthsForRouteModelWithPriorityMode(auths, provider, routeModel, now, false)
 }
 
+// withPoolCooldown keeps the upstream failure while reporting when the first
+// eligible credential can serve a new request, including credentials tried in
+// earlier rounds. Selecting again would mutate affinity and scheduler state.
+func (m *Manager) withPoolCooldown(ctx context.Context, providers []string, model string, opts cliproxyexecutor.Options, err error) error {
+	if err == nil || m.HomeEnabled() || statusCodeFromError(err) != http.StatusTooManyRequests {
+		return err
+	}
+	providerSet := make(map[string]struct{}, len(providers))
+	for _, provider := range providers {
+		providerSet[canonicalSchedulingProvider(provider)] = struct{}{}
+	}
+	pinnedAuthID := pinnedAuthIDFromMetadata(opts.Metadata)
+	eligibility := authSelectionEligibilityForRequest(ctx, opts)
+	registryRef := registry.GetGlobalRegistry()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	candidates := make([]*Auth, 0, len(m.auths))
+	for _, candidate := range m.auths {
+		if candidate == nil || candidate.Disabled || candidate.Status == StatusDisabled ||
+			(pinnedAuthID != "" && candidate.ID != pinnedAuthID) || !eligibility.allows(candidate) {
+			continue
+		}
+		provider := canonicalSchedulingProvider(executorKeyFromAuth(candidate))
+		if _, ok := providerSet[provider]; !ok {
+			continue
+		}
+		if _, ok := m.executorLocked(provider); !ok {
+			continue
+		}
+		if model != "" && !m.authSupportsRouteModel(registryRef, candidate, model) {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	if len(candidates) < 2 {
+		// A single credential already carries its own provider recovery hint.
+		return err
+	}
+	now := time.Now()
+	_, poolErr := m.availableAuthsForRouteModel(candidates, "mixed", model, now)
+	if poolErr == nil {
+		// A credential recovered during failover; suppress the last attempt's
+		// later deadline rather than asking the client to wait for it.
+		return &trustedRetryAfterError{cause: err, deadline: now}
+	}
+	var cooldown *modelCooldownError
+	if errors.As(poolErr, &cooldown) && cooldown != nil {
+		return &trustedRetryAfterError{cause: err, deadline: cooldown.deadline}
+	}
+	return err
+}
+
 func (m *Manager) availableAuthsForRouteModelAcrossPriorities(auths []*Auth, provider, routeModel string, now time.Time) ([]*Auth, error) {
 	return m.availableAuthsForRouteModelWithPriorityMode(auths, provider, routeModel, now, true)
 }
@@ -714,7 +766,9 @@ func restoreModelCooldownErrorModel(err error, requestedModel string) error {
 	if !errors.As(err, &cooldownErr) || cooldownErr == nil || cooldownErr.model != "" {
 		return err
 	}
-	return newModelCooldownErrorWithCause(requestedModel, cooldownErr.provider, cooldownErr.resetIn, cooldownErr.cause)
+	restored := newModelCooldownErrorWithCause(requestedModel, cooldownErr.provider, cooldownErr.resetIn, cooldownErr.cause)
+	restored.deadline = cooldownErr.deadline
+	return restored
 }
 
 func latestUnauthorizedCandidateError(auths []*Auth) error {

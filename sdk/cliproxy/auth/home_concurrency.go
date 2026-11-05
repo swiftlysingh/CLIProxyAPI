@@ -287,14 +287,14 @@ func SafeResponseHeaders(err error) http.Header {
 	if errors.As(err, &exhausted) && exhausted != nil {
 		// A nil aggregate means immediate or no aggregate hint; the last
 		// attempt's positive hint must not replace that decision.
-		if retryAfter := exhausted.RetryAfter(); retryAfter != nil {
-			return safeRetryAfterHeader(*retryAfter)
+		if exhausted.hasRetryAfter {
+			return safeRetryAfterHeader(time.Until(exhausted.deadline))
 		}
 		return nil
 	}
-	var trusted *trustedRetryAfterError
-	if errors.As(err, &trusted) && trusted != nil {
-		return trusted.SafeResponseHeaders()
+	var recovery interface{ recoveryDeadline() time.Time }
+	if errors.As(err, &recovery) {
+		return safeRetryAfterHeader(time.Until(recovery.recoveryDeadline()))
 	}
 	var busy *HomeConcurrencyBusyError
 	if errors.As(err, &busy) && busy != nil {
@@ -308,10 +308,6 @@ func SafeResponseHeaders(err error) http.Header {
 		}
 		return safeRetryAfterHeader(*retryAfter)
 	}
-	var modelCooldown *modelCooldownError
-	if errors.As(err, &modelCooldown) && modelCooldown != nil {
-		return modelCooldown.Headers()
-	}
 	var unavailable *authUnavailableError
 	if errors.As(err, &unavailable) && unavailable != nil {
 		return unavailable.Headers()
@@ -323,6 +319,32 @@ func SafeResponseHeaders(err error) http.Header {
 		}
 	}
 	return nil
+}
+
+// ClaudeCooldownHeaders describes the locally trusted recovery time in Claude's
+// native rate-limit format. Aggregate errors take precedence over their causes.
+func ClaudeCooldownHeaders(err error) http.Header {
+	if err == nil {
+		return nil
+	}
+	var deadline time.Time
+	var exhausted *homeRetryRoundExhaustedError
+	if errors.As(err, &exhausted) && exhausted != nil {
+		deadline = exhausted.deadline
+	} else {
+		var recovery interface{ recoveryDeadline() time.Time }
+		if errors.As(err, &recovery) {
+			deadline = recovery.recoveryDeadline()
+		}
+	}
+	if !deadline.After(time.Now()) {
+		return nil
+	}
+	return http.Header{
+		"Anthropic-Ratelimit-Unified-Status":               []string{"rejected"},
+		"Anthropic-Ratelimit-Unified-Reset":                []string{strconv.FormatInt(deadline.Add(time.Second-time.Nanosecond).Unix(), 10)},
+		"Anthropic-Ratelimit-Unified-Representative-Claim": []string{"unified"},
+	}
 }
 
 func safeRetryAfterHeader(retryAfter time.Duration) http.Header {
